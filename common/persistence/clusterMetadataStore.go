@@ -27,6 +27,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -193,7 +194,15 @@ func (m *clusterMetadataManagerImpl) SaveClusterMetadata(
 	if err != nil {
 		return false, err
 	}
+
+	request.ClusterId = oldClusterMetadata.ClusterId
+	request.Version = oldClusterMetadata.Version
+
 	if immutableFieldsChanged(oldClusterMetadata.ClusterMetadata, request.ClusterMetadata) {
+		return false, nil
+	}
+
+	if reflect.DeepEqual(oldClusterMetadata.ClusterMetadata, request.ClusterMetadata) {
 		return false, nil
 	}
 

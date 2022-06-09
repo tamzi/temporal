@@ -629,6 +629,8 @@ func ApplyClusterMetadataConfigProvider(
 		if applied {
 			logger.Info("Successfully saved cluster metadata.", tag.ClusterName(clusterName))
 			continue
+		} else {
+			logger.Info("Skipped saving cluster metadata.", tag.ClusterName(clusterName))
 		}
 
 		resp, err := clusterMetadataManager.GetClusterMetadata(ctx, &persistence.GetClusterMetadataRequest{
