@@ -639,11 +639,13 @@ func ApplyClusterMetadataConfigProvider(
 		}
 
 		// Allow updating cluster metadata if global namespace is disabled
-		if !resp.IsGlobalNamespaceEnabled && clusterData.EnableGlobalNamespace {
+		if (!resp.IsGlobalNamespaceEnabled && clusterData.EnableGlobalNamespace) ||
+			resp.ClusterAddress != clusterInfo.RPCAddress {
 			currentMetadata := resp.ClusterMetadata
 			currentMetadata.IsGlobalNamespaceEnabled = clusterData.EnableGlobalNamespace
 			currentMetadata.InitialFailoverVersion = clusterInfo.InitialFailoverVersion
 			currentMetadata.FailoverVersionIncrement = clusterData.FailoverVersionIncrement
+			currentMetadata.ClusterAddress = clusterInfo.RPCAddress
 
 			applied, err = clusterMetadataManager.SaveClusterMetadata(
 				ctx,
