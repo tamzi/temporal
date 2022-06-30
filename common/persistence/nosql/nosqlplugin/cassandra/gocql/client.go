@@ -79,6 +79,9 @@ func NewCassandraCluster(
 			return nil, errors.New("Cannot specify both caData and caFile properties")
 		}
 
+		// TODO: hack
+		cfg.TLS.EnableHostVerification = false
+
 		cluster.SslOpts = &gocql.SslOptions{
 			CaPath:                 cfg.TLS.CaFile,
 			EnableHostVerification: cfg.TLS.EnableHostVerification,
