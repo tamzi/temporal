@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -114,6 +115,8 @@ type (
 		workflowDeleteManager      workflow.DeleteManager
 		eventSerializer            serialization.Serializer
 		workflowConsistencyChecker api.WorkflowConsistencyChecker
+
+		sync.Mutex
 	}
 )
 
@@ -1901,6 +1904,9 @@ func (e *historyEngineImpl) SignalWithStartWorkflowExecution(
 		return nil, err
 	}
 	namespaceID := namespaceEntry.ID()
+
+	//e.Lock()
+	//defer e.Unlock()
 
 	var currentWorkflowContext api.WorkflowContext
 	currentWorkflowContext, err = e.workflowConsistencyChecker.GetWorkflowContext(

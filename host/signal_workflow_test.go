@@ -27,8 +27,11 @@ package host
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -1587,4 +1590,113 @@ func (s *integrationSuite) TestSignalWithStartWorkflow_IDReusePolicy() {
 	})
 	s.NoError(err)
 	s.Equal(enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING, descResp.WorkflowExecutionInfo.Status)
+}
+
+func (s *integrationSuite) TestSignalWithStartWorkflow_Parallel() {
+	id := "integration-signal-with-start-workflow-parallel-test"
+	wt := "integration-signal-with-start-workflow-parallel-test-type"
+	tl := "integration-signal-with-start-workflow-parallel-test-taskqueue"
+	identity := "worker1"
+
+	workflowType := &commonpb.WorkflowType{Name: wt}
+
+	taskQueue := &taskqueuepb.TaskQueue{Name: tl}
+
+	totalSignals := 10
+	requestBase := workflowservice.SignalWithStartWorkflowExecutionRequest{
+		Namespace:             s.namespace,
+		WorkflowId:            id,
+		WorkflowType:          workflowType,
+		TaskQueue:             taskQueue,
+		Input:                 nil,
+		WorkflowRunTimeout:    timestamp.DurationPtr(100 * time.Second),
+		WorkflowTaskTimeout:   timestamp.DurationPtr(1 * time.Second),
+		Identity:              identity,
+		WorkflowIdReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+		// RequestId to be set by concurrent caller
+		// SignalName to be set by concurrent caller
+		// SignalInput to be set by concurrent caller
+	}
+
+	runID := ""
+	workflowCompleted := false
+	wtHandler := func(execution *commonpb.WorkflowExecution, wt *commonpb.WorkflowType,
+		previousStartedEventID, startedEventID int64, history *historypb.History) ([]*commandpb.Command, error) {
+
+		runID = execution.GetRunId()
+
+		signalReceived := make(map[string]struct{})
+		for _, event := range history.Events {
+			if event.GetEventType() == enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED {
+				signalReceived[event.GetWorkflowExecutionSignaledEventAttributes().SignalName] = struct{}{}
+			}
+		}
+		fmt.Println("#######")
+		prettyPrint := func(input interface{}) string {
+			binary, _ := json.MarshalIndent(input, "", "  ")
+			return string(binary)
+		}
+		fmt.Printf("Signal count: %v\n", len(signalReceived))
+		fmt.Printf("%v\n", prettyPrint(history.Events))
+		fmt.Println("#######")
+		if len(signalReceived) < totalSignals {
+			return []*commandpb.Command{}, nil
+		}
+
+		workflowCompleted = true
+		return []*commandpb.Command{{
+			CommandType: enumspb.COMMAND_TYPE_COMPLETE_WORKFLOW_EXECUTION,
+			Attributes: &commandpb.Command_CompleteWorkflowExecutionCommandAttributes{
+				CompleteWorkflowExecutionCommandAttributes: &commandpb.CompleteWorkflowExecutionCommandAttributes{
+					Result: payloads.EncodeString("Done"),
+				}},
+		}}, nil
+	}
+
+	poller := &TaskPoller{
+		Engine:              s.engine,
+		Namespace:           s.namespace,
+		TaskQueue:           taskQueue,
+		Identity:            identity,
+		WorkflowTaskHandler: wtHandler,
+		ActivityTaskHandler: nil,
+		Logger:              s.Logger,
+		T:                   s.T(),
+	}
+
+	waitGroup := sync.WaitGroup{}
+	waitGroup.Add(totalSignals)
+	for i := 0; i < totalSignals; i++ {
+		signalWithStartRequest := requestBase
+		signalWithStartRequest.RequestId = uuid.New()
+		signalWithStartRequest.SignalName = strconv.Itoa(i)
+		go func() {
+			waitGroup.Wait()
+
+			startTime := time.Now()
+			resp, err := s.engine.SignalWithStartWorkflowExecution(NewContext(), &signalWithStartRequest)
+			s.NoError(err)
+			fmt.Printf("####### runID: %v #######\n", resp.RunId)
+			fmt.Printf("####### %v: %v ms #######\n", signalWithStartRequest.SignalName, time.Now().Sub(startTime).Microseconds()/1000.0)
+		}()
+		waitGroup.Done()
+	}
+
+	for !workflowCompleted {
+		_, err := poller.PollAndProcessWorkflowTask(false, false)
+		s.Logger.Info("PollAndProcessWorkflowTask", tag.Error(err))
+		s.NoError(err)
+
+		events := s.getHistory(s.namespace, &commonpb.WorkflowExecution{
+			WorkflowId: id,
+			RunId:      runID,
+		})
+		fmt.Println("####### @@")
+		prettyPrint := func(input interface{}) string {
+			binary, _ := json.MarshalIndent(input, "", "  ")
+			return string(binary)
+		}
+		fmt.Printf("%v\n", prettyPrint(events))
+		fmt.Println("####### @@")
+	}
 }
