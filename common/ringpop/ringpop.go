@@ -116,7 +116,14 @@ func (factory *ringpopFactory) GetMembershipMonitor() (membership.Monitor, error
 func (factory *ringpopFactory) getMembership() (membership.Monitor, error) {
 	var err error
 	factory.monOnce.Do(func() {
-		if rp, err := ringpop.New("temporal", ringpop.Channel(factory.getTChannel()), ringpop.AddressResolverFunc(factory.broadcastAddressResolver)); err != nil {
+		if rp, err := ringpop.New(
+			"temporal",
+			ringpop.Channel(factory.getTChannel()),
+			ringpop.AddressResolverFunc(factory.broadcastAddressResolver),
+			ringpop.SuspectPeriod(2*time.Second),    // default 5 * time.Second
+			ringpop.FaultyPeriod(1*time.Minute),     // default 24 * time.Hour
+			ringpop.TombstonePeriod(10*time.Second), // default 1 * time.Minute
+		); err != nil {
 			factory.logger.Fatal("Failed to get new ringpop", tag.Error(err))
 		} else {
 			mrp := membership.NewRingPop(rp, factory.config.MaxJoinDuration, factory.logger)
